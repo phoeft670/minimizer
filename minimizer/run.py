@@ -147,6 +147,40 @@ class RunWithInputFile(Run):
         return (out_str, err_str, process.returncode)
 
 
+def __run_run(state, results, name, run):
+    stdout, stderr, returncode = run.start(state)
+    if run.log_always or run.log_on_fail and returncode != 0:
+        cwd = state["cwd"] if "cwd" in state else os.path.dirname(
+                tools.get_script_path())
+        if stdout:
+            with open(os.path.join(cwd, f"{name}.log"), "w") as logfile:
+                logfile.write(stdout)
+        if stderr:
+            with open(os.path.join(cwd, f"{name}.err"), "w") as errfile:
+                errfile.write(stderr)
+    results.update(
+            {name: {"stdout": stdout, "stderr": stderr, "returncode": returncode}}
+        )
+"""
+def __parse_run(parsers, parsed_results, name, result):
+    parsed_results.update(
+            {name: {"stdout": {}, "stderr": {},
+                    "returncode": result["returncode"]}}
+        )
+    for parser in parsers:
+        parsed_results[name]["stdout"].update(
+                parser.parse(name, result["stdout"]))
+        parsed_results[name]["stderr"].update(
+                parser.parse(name, result["stderr"]))
+"""
+
+def __parse_run(parsers, parsed_results, name, result):
+    for parser in parsers:
+        parsed_results[name].update(
+                parser.parse(name, result["stdout"]))
+        parsed_results[name].update(
+                parser.parse(name, result["stderr"]))
+
 def run_all(state):
     """Start all runs in *state["runs"]* and return a *results* dictionary
     where run outputs of run *run_name* can be accessed via:
@@ -158,19 +192,7 @@ def run_all(state):
     assert "runs" in state, "Could not find entry \"runs\" in state."
     results = {}
     for name, run in state["runs"].items():
-        stdout, stderr, returncode = run.start(state)
-        if run.log_always or run.log_on_fail and returncode != 0:
-            cwd = state["cwd"] if "cwd" in state else os.path.dirname(
-                tools.get_script_path())
-            if stdout:
-                with open(os.path.join(cwd, f"{name}.log"), "w") as logfile:
-                    logfile.write(stdout)
-            if stderr:
-                with open(os.path.join(cwd, f"{name}.err"), "w") as errfile:
-                    errfile.write(stderr)
-        results.update(
-            {name: {"stdout": stdout, "stderr": stderr, "returncode": returncode}}
-        )
+        __run_run(state, results, name, run)
     return results
 
 
@@ -185,14 +207,13 @@ def run_and_parse_all(state, parsers):
     parsed_results = {}
     parsers = [parsers] if not isinstance(parsers, list) else parsers
     for name, result in results.items():
-        parsed_results.update(
-            {name: {"stdout": {}, "stderr": {},
-                    "returncode": result["returncode"]}}
-        )
-        for parser in parsers:
-            parsed_results[name]["stdout"].update(
-                parser.parse(name, result["stdout"]))
-            parsed_results[name]["stderr"].update(
-                parser.parse(name, result["stderr"]))
+        __parse_run(parsers, parsed_results, name, result)
     parsed_results["raw_results"] = results
     return parsed_results
+
+def run_and_parse_sequentially(state, parsers, order):
+    parsers = [parsers] if not isinstance(parsers, list) else parsers
+    for name in order:
+        __run_run(state,state,name,state["runs"][name])
+        __parse_run(parsers,state,name,state[name])
+    return state
