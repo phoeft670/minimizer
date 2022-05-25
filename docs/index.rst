@@ -1,27 +1,33 @@
 .. include:: ../README.rst
 
 .. toctree::
-   :caption: Getting Started
+   :caption: User Documentation
+   :maxdepth: 3
 
    installation
+   overview
+   usage
    how_does_it_work
-   tutorial
-   
-.. extension
+   extending-machetli
 
 .. toctree::
-   :caption: API
+   :caption: API Documentation - Planning
 
-   minimizer.evaluate
-   minimizer.main
-   minimizer.parser
-   minimizer.run
-   minimizer.search
-   minimizer.planning.auxiliary
-   minimizer.planning.generators
+   machetli.pddl
+   machetli.sas
 
 .. toctree::
-   :caption: General
+   :caption: API Documentation - General
+
+   machetli
+   machetli.environments
+   machetli.evaluator
+   machetli.successors
+   machetli.tools
+
+.. toctree::
+   :caption: Meta Documentation
    :titlesonly:
 
    DOCS_GUIDE
+
