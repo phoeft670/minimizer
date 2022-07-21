@@ -16,13 +16,16 @@ if platform.node().endswith((".scicore.unibas.ch", ".cluster.bc2.ch")):
 else:
     environment = environments.LocalEnvironment()
 
+# This experiment was first conducted on Fast Downward revision 80c1b35 where
+# h+ was inadmissible.
+
 script_dir = os.path.dirname(tools.get_script_path())
-domain = os.path.join(script_dir, "robert-tony/domain.pddl")
-problem = os.path.join(script_dir, "robert-tony/problem.pddl")
+domain = os.path.join(script_dir, "problem/p27-domain.pddl")
+problem = os.path.join(script_dir, "problem/p27.pddl")
 
 initial_state = pddl.generate_initial_state(domain, problem)
 successor_generators = [
-    pddl.RemovePredicates(replace_with="true"),
+    pddl.RemovePredicates("true"),
     pddl.RemoveActions(),
     pddl.RemoveObjects(),
 ]
@@ -31,8 +34,8 @@ result = search(initial_state, successor_generators, evaluator_filename,
                 environment)
 
 pddl_result_names = (
-    os.path.join(script_dir, "robert-tony/small-domain.pddl"),
-    os.path.join(script_dir, "robert-tony/small-problem.pddl"),
+    os.path.join(script_dir, "problem/small-domain.pddl"),
+    os.path.join(script_dir, "problem/small-problem.pddl"),
 )
 pddl.write_files(result, pddl_result_names[0], pddl_result_names[1])
 
@@ -50,11 +53,11 @@ initial_state = sas.generate_initial_state(sas_file)
 successor_generators = [
     sas.RemoveOperators(),
     sas.RemoveVariables(),
-    sas.RemoveEffect(),
-    sas.SetUnspecifiedPrevailCondition(),
+    sas.RemovePrePosts(),
+    sas.SetUnspecifiedPreconditions(),
     sas.MergeOperators(),
 ]
 evaluator_filename = os.path.join(script_dir, "sas_evaluator.py")
 result = search(initial_state, successor_generators, evaluator_filename,
                 environment)
-sas.write_file(result, "robert-tony/result.sas")
+sas.write_file(result, "problem/result.sas")

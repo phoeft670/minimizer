@@ -7,7 +7,6 @@
    installation
    overview
    usage
-   how_does_it_work
    extending-machetli
 
 .. toctree::
@@ -29,5 +28,5 @@
    :caption: Meta Documentation
    :titlesonly:
 
-   DOCS_GUIDE
+   documentation
 

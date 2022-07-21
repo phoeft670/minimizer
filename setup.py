@@ -5,7 +5,7 @@ with open("README.rst", "r", encoding="utf-8") as fh:
 
 setup(
     name="machetli",
-    version="0.5",
+    version="0.7",
     description="Locate bugs in your program",
     long_description=long_description,
     long_description_content_type="text/x-rst",
@@ -14,7 +14,7 @@ setup(
     url="https://github.com/aibasel/machetli",
     license="GPL3+",
     project_urls={
-        "Documentation": "https://minimizer.readthedocs.io/",
+        "Documentation": "https://machetli.readthedocs.io/",
     },
     classifiers=[
         "Environment :: Console",

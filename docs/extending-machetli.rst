@@ -8,6 +8,8 @@ Machetli comes with some existing methods to simplify PDDL and SAS\ :sup:`+`
 tasks. If those are not sufficient for your case or if your instances are in a
 different format, you can easily extend Machetli.
 
+.. _extending-machetli-successor-generator:
+
 Adding a new successor generator
 --------------------------------
 
@@ -20,8 +22,13 @@ Your implementation should yield objects of the class
 :class:`Successor <machetli.successors.Successor>` that contain a modified
 state and a message that will be printed if the search follows this successor.
 
+Example: removing goal conditions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 As an example, consider a successor generator that simplifies the goal of an
-SAS\ :sup:`+` task. We start by importing the necessary classes and constants.
+SAS\ :sup:`+` task (this successor generator actually is already implemented but
+for this example we pretend it isn't). We start by importing the necessary
+classes and constants.
 
 .. code-block:: python
     :linenos:
@@ -41,7 +48,7 @@ Within the state we can access the parsed SAS\ :sup:`+` task with the constant `
     :linenos:
     :lineno-start: 7
 
-    class RemoveGoal(SuccessorGenerator):
+    class RemoveGoals(SuccessorGenerator):
         def get_successors(self, state):
             task = state[KEY_IN_STATE]
             # ...
@@ -72,6 +79,7 @@ message passed to the successor will be displayed on the command line if this
 successor is picked by the search (i.e., if it is the first one that still
 exhibits the behavior the user is trying to isolate).
 
+.. _extending-machetli-file-type:
 
 Supporting a new file type
 --------------------------
@@ -99,7 +107,7 @@ As an example, consider the methods provided in the module
 
 
 Example: finding bugs in LaTeX documents
-----------------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In the following example, we combine what we discussed in the previous sections
 to create rudimentary support for LaTeX documents.
