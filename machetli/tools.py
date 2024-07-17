@@ -2,7 +2,7 @@
 This module is derived from ``tools.py`` of Lab (<https://lab.readthedocs.io>).
 Functions and classes that are not needed for this project were removed.
 """
-import errno
+import itertools
 import logging
 import os
 import pickle
@@ -16,6 +16,25 @@ import time
 
 
 DEFAULT_ENCODING = "utf-8"
+
+
+# From https://docs.python.org/3/library/itertools.html#itertools-recipes
+def batched(iterable, n):
+    """Batch data into tuples of length n. The last batch may be shorter.
+
+    :Example:
+
+    .. code-block:: python
+
+        batched('ABCDEFG', 3) # --> ABC DEF G
+
+
+    """
+    if n < 1:
+        raise ValueError('n must be at least one')
+    it = iter(iterable)
+    while batch := tuple(itertools.islice(it, n)):
+        yield batch
 
 
 def get_string(s):
@@ -139,90 +158,6 @@ def read_state(file_path, wait_time, repetitions):
     else:
         logging.critical(f"Could not find file '{file_path}' after {repetitions} attempts.")
 
-
-class SubmissionError(Exception):
-    """
-    Exception thrown when submitting a slurm job on the grid fails.
-
-    .. note:: Deprecated (might be removed soon)
-    """
-    def __init__(self, cpe):
-        self.returncode = cpe.returncode
-        self.cmd = cpe.cmd
-        self.output = cpe.output
-        self.stdout = cpe.stdout
-        self.stderr = cpe.stderr
-
-    def __str__(self):
-        return f"""
-                Error during job submission:
-                Submission command: {self.cmd}
-                Returncode: {self.returncode}
-                Output: {self.output}
-                Captured stdout: {self.stdout}
-                Captured stderr: {self.stderr}"""
-
-    def warn(self):
-        logging.warning(f"The following batch submission failed but is "
-                        f"ignored: {self}")
-
-    def warn_abort(self):
-        logging.error(
-            f"Task order cannot be kept because the following batch "
-            f"submission failed: {self} Aborting search.")
-
-
-class TaskError(Exception):
-    """
-    Exception thrown when a slurm job on the grid enters a critical state.
-
-    .. note:: Deprecated (might be removed soon)
-    """
-    def __init__(self, critical_tasks):
-        self.critical_tasks = critical_tasks
-        self.indices_critical = [int(parts[1]) for parts in (
-            task_id.split("_") for task_id in self.critical_tasks)]
-
-    def __repr__(self):
-        return pprint.pformat(self.critical_tasks)
-
-    def remove_critical_tasks(self, job):
-        """Remove tasks from job that entered a critical state."""
-        job["tasks"] = [t for i, t in enumerate(
-            job["tasks"]) if i not in self.indices_critical]
-        logging.warning(
-            f"Some tasks from job {job['id']} entered a critical "
-            f"state but the search is continued.")
-
-    def remove_tasks_after_first_critical(self, job):
-        """
-        Remove all tasks from job after the first one that entered a
-        critical state.
-        """
-        first_failed = self.indices_critical[0]
-        job["tasks"] = job["tasks"][:first_failed]
-        if not job["tasks"]:
-            logging.error("Since the first task failed, the order "
-                          "cannot be kept. Aborting search.")
-        else:
-            logging.warning(
-                f"At least one task from job {job['id']} entered a "
-                f"critical state: {self} The tasks before the first "
-                f"critical one are still considered.")
-
-
-class PollingError(Exception):
-    """
-    Exception thrown when querying the status of a slurm job on the grid fails.
-
-    .. note:: Deprecated (might be removed soon)
-    """
-    def __init__(self, job_id):
-        self.job_id = job_id
-
-    def warn_abort(self):
-        logging.error(f"Polling job {self.job_id} caused an error. "
-                      f"Aborting search.")
 
 # This function is copied from lab.calls.call (<https://lab.readthedocs.org>).
 def _set_limit(kind, soft_limit, hard_limit):
