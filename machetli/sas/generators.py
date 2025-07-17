@@ -1,34 +1,187 @@
 import copy
 import itertools
 import random
+import math
 
 from machetli.sas.constants import KEY_IN_STATE
-from machetli.sas.sas_tasks import SASTask, SASMutexGroup, SASInit, SASGoal, \
-    SASOperator, SASAxiom
+from machetli.sas.sas_tasks import (
+    SASTask,
+    SASMutexGroup,
+    SASInit,
+    SASGoal,
+    SASOperator,
+    SASAxiom,
+)
 from machetli.successors import Successor, SuccessorGenerator
+from machetli.tools import batched,ceildiv
 
 
-class RemoveOperators(SuccessorGenerator):
+class RemoveOperatorsUnique(SuccessorGenerator):
+
+    def __init__(self, max_tries=math.inf,iteration_limit=math.inf):
+        self.non_removable = set()
+        self.max_tries = max_tries
+        self.iteration_limit = iteration_limit
+        self.current_tries = 0
+
     """
     For each operator, generate a successor where this operator is
     removed. The order of the successors is randomized.
     """
+
+    def get_successors(self, state):
+        task = state[KEY_IN_STATE]
+        operator_names = [op.name for op in task.operators if op.name not in self.non_removable]
+        random.Random().shuffle(operator_names)
+        print(f"detected {len(self.non_removable)} operators as non-removable")
+        self.iteration_limit -= self.current_tries
+        self.current_tries = 0
+        for name in operator_names:
+            if self.current_tries >= self.max_tries or self.iteration_limit <= 0:
+                break
+            self.current_tries += 1
+            child_state = copy.deepcopy(state)
+            pre_child_task = child_state[KEY_IN_STATE]
+            child_state[KEY_IN_STATE] = self.transform(pre_child_task, name)
+            message = (
+                f"Removed operator '{name}'. Remaining operators: {len(task.operators)}, untested: {len(operator_names)}"
+            )
+            yield Successor(child_state, message)
+            #print(f"operator '{name}' is non-removable")
+            self.non_removable.add(name)
+
+    def transform(self, task, op_names):
+        new_operators = [op for op in task.operators if op.name not in op_names]
+
+        return SASTask(
+            task.variables,
+            task.mutexes,
+            task.init,
+            task.goal,
+            new_operators,
+            task.axioms,
+            task.metric,
+        )
+
+class RemoveOperators(SuccessorGenerator):
+
+    def __init__(self, batch_size=1, batches=None, max_tries=math.inf):
+        self.batch_size = batch_size
+        self.batches = batches
+        self.max_tries = max_tries
+
+    """
+    For each operator, generate a successor where this operator is
+    removed. The order of the successors is randomized.
+    """
+
     def get_successors(self, state):
         task = state[KEY_IN_STATE]
         operator_names = [op.name for op in task.operators]
         random.Random().shuffle(operator_names)
-        for name in operator_names:
+        if self.batches:
+            self.batch_size = ceildiv(len(operator_names), self.batches)
+        print(f"batch size: {self.batch_size} for {min(ceildiv(len(operator_names), self.batch_size), self.max_tries)} batches")
+        iterations = 0
+        for names in batched(operator_names, self.batch_size):
+            if iterations >= self.max_tries:
+                break
+            iterations += 1
             child_state = copy.deepcopy(state)
             pre_child_task = child_state[KEY_IN_STATE]
-            child_state[KEY_IN_STATE] = self.transform(pre_child_task, name)
-            yield Successor(child_state,
-                            f"Removed operator '{name}'. Remaining operators: {len(operator_names) - 1}")
+            child_state[KEY_IN_STATE] = self.transform(pre_child_task, names)
+            message = (
+                f"Removed operators '{names}'. Remaining operators: {len(operator_names) - len(names)}"
+                if self.batch_size < 100
+                else f"Removed {len(names)} operators. Remaining operators: {len(operator_names) - len(names)}"
+            )
+            yield Successor(child_state, message)
 
-    def transform(self, task, op_name):
-        new_operators = [op for op in task.operators if not op.name == op_name]
+    def transform(self, task, op_names):
+        new_operators = [op for op in task.operators if op.name not in op_names]
 
-        return SASTask(task.variables, task.mutexes, task.init, task.goal,
-                       new_operators, task.axioms, task.metric)
+        return SASTask(
+            task.variables,
+            task.mutexes,
+            task.init,
+            task.goal,
+            new_operators,
+            task.axioms,
+            task.metric,
+        )
+
+class RemoveOperatorsAdaptive(SuccessorGenerator):
+
+    def __init__(self,max_tries=math.inf,iteration_limit=math.inf):
+        self.batch_size = 1
+        self.iterations = 0
+        self.iteration_limit = iteration_limit
+        self.max_tries = max_tries
+
+    """
+    For each operator, generate a successor where this operator is
+    removed. The order of the successors is randomized.
+    """
+
+    def get_successors(self, state):
+        while True:
+            task = state[KEY_IN_STATE]
+            operator_names = [op.name for op in task.operators]
+            batches = min(len(operator_names)//self.batch_size + 1, self.max_tries)
+            print(f"previous batches: {batches}")
+            print(f"previous iterations: {self.iterations}")
+            print(f"found successor after {(self.iterations/batches) * 100} percent")
+            if self.iterations <= batches/8: # under 12.5% of batches
+                self.batch_size += max(int(self.batch_size*0.5),1)
+                self.batch_size = min(self.batch_size, len(operator_names))
+                print(f"new inc batch size: {self.batch_size}")
+            elif self.iterations >= batches: # exhausted batches
+                self.batch_size //= 4
+                self.batch_size = max(self.batch_size, 1)
+                print(f"new strongly dec batch size: {self.batch_size}")
+            elif self.iterations > batches/3: # over 33% of batches
+                self.batch_size //= 2
+                self.batch_size = max(self.batch_size, 1)
+                print(f"new dec batch size: {self.batch_size}")
+            planned_batches = len(operator_names)//self.batch_size + 1
+            print(f"generating batches: {min(planned_batches, self.max_tries)}/{planned_batches}")
+            random.Random().shuffle(operator_names)
+            self.iterations = 0
+            for names in batched(operator_names, self.batch_size):
+                if self.iterations >= self.max_tries or self.iteration_limit <= 0:
+                    return None
+                self.iterations += 1
+                self.iteration_limit -= 1
+                child_state = copy.deepcopy(state)
+                pre_child_task = child_state[KEY_IN_STATE]
+                child_state[KEY_IN_STATE] = self.transform(pre_child_task, names)
+                message = (
+                    f"Removed operators '{names}'. Remaining operators: {len(operator_names) - len(names)}"
+                    if self.batch_size < 100
+                    else f"Removed {len(names)} operators. Remaining operators: {len(operator_names) - len(names)}"
+                )
+                yield Successor(child_state, message)
+            if self.batch_size == 1:
+                return None
+
+
+        #if self.batch_size > 1:
+        #    self.batch_size //= 3
+        #    self.batch_size = max(self.batch_size, 1)
+        #    print(f"new batch size: {self.batch_size}")
+
+    def transform(self, task, op_names):
+        new_operators = [op for op in task.operators if op.name not in op_names]
+
+        return SASTask(
+            task.variables,
+            task.mutexes,
+            task.init,
+            task.goal,
+            new_operators,
+            task.axioms,
+            task.metric,
+        )
 
 
 class RemoveVariables(SuccessorGenerator):
@@ -39,6 +192,7 @@ class RemoveVariables(SuccessorGenerator):
     condition, effect fact, or goal. The order of the successors is
     randomized.
     """
+
     def get_successors(self, state):
         task = state[KEY_IN_STATE]
         variables = [var for var in range(len(task.variables.axiom_layers))]
@@ -47,8 +201,10 @@ class RemoveVariables(SuccessorGenerator):
             child_state = copy.deepcopy(state)
             pre_child_task = child_state[KEY_IN_STATE]
             child_state[KEY_IN_STATE] = self.transform(pre_child_task, var)
-            yield Successor(child_state,
-                            f"Removed a variable. Remaining variables: {len(variables) - 1}")
+            yield Successor(
+                child_state,
+                f"Removed a variable. Remaining variables: {len(variables) - 1}",
+            )
 
     def transform(self, task, var):
         # remove var attributes from variables object
@@ -65,7 +221,9 @@ class RemoveVariables(SuccessorGenerator):
                     continue
                 if fact[0] > var:
                     variable_index, value = fact
-                    variable_index = variable_index - 1  # decrement variable indices above var
+                    variable_index = (
+                        variable_index - 1
+                    )  # decrement variable indices above var
                     fact = (variable_index, value)
                 new_facts.append(fact)
             new_mutexes.append(SASMutexGroup(new_facts))
@@ -79,7 +237,9 @@ class RemoveVariables(SuccessorGenerator):
                 continue
             if pair[0] > var:
                 variable_index, value = pair
-                variable_index = variable_index - 1  # decrement variable indices above var
+                variable_index = (
+                    variable_index - 1
+                )  # decrement variable indices above var
                 pair = (variable_index, value)
             new_goal_pairs.append(pair)
         new_goal = SASGoal(new_goal_pairs)
@@ -92,7 +252,9 @@ class RemoveVariables(SuccessorGenerator):
                     continue
                 if pre[0] > var:
                     variable_index, value = pre
-                    variable_index = variable_index - 1  # decrement variable indices above var
+                    variable_index = (
+                        variable_index - 1
+                    )  # decrement variable indices above var
                     pre = (variable_index, value)
                 new_prevail.append(pre)
             new_effects = []
@@ -108,13 +270,17 @@ class RemoveVariables(SuccessorGenerator):
                         continue
                     if precondition[0] > var:
                         variable_index, value = precondition
-                        variable_index = variable_index - 1  # decrement variable indices above var
+                        variable_index = (
+                            variable_index - 1
+                        )  # decrement variable indices above var
                         precondition = (variable_index, value)
                     new_cond.append(precondition)
                 new_effects.append((v, pre, post, new_cond))
             if not new_effects:
                 continue
-            new_operators.append(SASOperator(op.name, new_prevail, new_effects, op.cost))
+            new_operators.append(
+                SASOperator(op.name, new_prevail, new_effects, op.cost)
+            )
         # remove var from condition and effect of axioms
         new_axioms = []
         for ax in task.axioms:
@@ -122,7 +288,9 @@ class RemoveVariables(SuccessorGenerator):
                 continue
             if ax.effect[0] > var:
                 variable_index, value = ax.effect
-                variable_index = variable_index - 1  # decrement variable indices above var
+                variable_index = (
+                    variable_index - 1
+                )  # decrement variable indices above var
                 ax.effect = (variable_index, value)
             new_condition = []
             for cond in ax.condition:
@@ -130,16 +298,31 @@ class RemoveVariables(SuccessorGenerator):
                     continue
                 if cond[0] > var:
                     variable_index, value = cond
-                    variable_index = variable_index - 1  # decrement variable indices above var
+                    variable_index = (
+                        variable_index - 1
+                    )  # decrement variable indices above var
                     cond = (variable_index, value)
                 new_condition.append(cond)
             # axiom condition may also be empty
             new_axioms.append(SASAxiom(new_condition, ax.effect))
 
-        return SASTask(new_variables, new_mutexes, new_init, new_goal, new_operators, new_axioms, task.metric)
+        return SASTask(
+            new_variables,
+            new_mutexes,
+            new_init,
+            new_goal,
+            new_operators,
+            new_axioms,
+            task.metric,
+        )
 
 
 class RemovePrePosts(SuccessorGenerator):
+
+    def __init__(self,max_tries=10000000,iteration_limit=10000000):
+        self.max_tries = max_tries
+        self.iteration_limit = iteration_limit
+        self.current_iteration = 0
     """
     For each precondition/effect pair in each operator, generate a successor
     where this pair is removed. This essentially ignores the variable in the
@@ -147,20 +330,35 @@ class RemovePrePosts(SuccessorGenerator):
     the order of precondition/effect pairs of the same operator, but all
     successors stemming from the same operator follow consecutively.
     """
+
     def get_successors(self, state):
         task = state[KEY_IN_STATE]
         num_ops = len(task.operators)
+        self.iteration_limit -= self.current_iteration
+        self.current_iteration = 0
         for op in random.sample(range(num_ops), num_ops):
+            if self.current_iteration >= self.max_tries or self.iteration_limit <= 0:
+                break
+            self.current_iteration += 1
             num_eff = len(task.operators[op].pre_post)
-            for effect in random.sample(range(num_eff), num_eff):
-                child_state = copy.deepcopy(state)
-                del child_state[KEY_IN_STATE].operators[op].pre_post[effect]
-                yield Successor(child_state, f"Removed an effect of operator '{task.operators[op].name}'.")
+            if num_eff > 1:#operators without effects cause issues, remove them with the remove operator successor generator
+                for effect in random.sample(range(num_eff), num_eff):
+                    child_state = copy.deepcopy(state)
+                    del child_state[KEY_IN_STATE].operators[op].pre_post[effect]
+                    yield Successor(
+                        child_state,
+                        f"Removed an effect of operator '{task.operators[op].name}'.",
+                    )
 
 
 class SetUnspecifiedPreconditions(SuccessorGenerator):
+    def __init__(self,max_tries=10000000,iteration_limit=10000000):
+        self.max_tries = max_tries
+        self.current_iteration = 0
+        self.iteration_limit = iteration_limit
+
     """
-    For each operator and each variable this operator on which this operator 
+    For each operator and each variable this operator on which this operator
     has an effect but no precondition, and for each possible value of this
     variable, generate a successor with an additional precondition on the
     variable. This limits the situations where the operator can be applied,
@@ -169,10 +367,15 @@ class SetUnspecifiedPreconditions(SuccessorGenerator):
     operator, but all successors stemming from the same operator follow
     consecutively.
     """
+
     def get_successors(self, state):
         task = state[KEY_IN_STATE]
         num_ops = len(task.operators)
+        self.iteration_limit -= self.current_iteration
+        self.current_iteration = 0
         for op in random.sample(range(num_ops), num_ops):
+            if self.current_iteration >= self.max_tries or self.iteration_limit <= 0:
+                break
             num_eff = len(task.operators[op].pre_post)
             for effect in random.sample(range(num_eff), num_eff):
                 var, pre, post, cond = task.operators[op].pre_post[effect]
@@ -180,11 +383,17 @@ class SetUnspecifiedPreconditions(SuccessorGenerator):
                     num_val = task.variables.ranges[var]
                     for val in random.sample(range(num_val), num_val):
                         child_state = copy.deepcopy(state)
-                        child_state[KEY_IN_STATE].operators[op].pre_post[
-                            effect] = (var, val, post, cond)
+                        child_state[KEY_IN_STATE].operators[op].pre_post[effect] = (
+                            var,
+                            val,
+                            post,
+                            cond,
+                        )
+                        self.current_iteration += 1
                         yield Successor(
                             child_state,
-                            f"Removed a prevail condition of operator '{task.operators[op].name}'.")
+                            f"Removed a prevail condition of operator '{task.operators[op].name}'.",
+                        )
 
 
 class MergeOperators(SuccessorGenerator):
@@ -195,6 +404,7 @@ class MergeOperators(SuccessorGenerator):
     executing the two operators in sequence. Cases where this is not
     possible (e.g., with conflicting prevail conditions) are skipped.
     """
+
     def get_successors(self, state):
         task = state[KEY_IN_STATE]
         for op1, op2 in itertools.permutations(task.operators, 2):
@@ -202,9 +412,11 @@ class MergeOperators(SuccessorGenerator):
             child_task = self.transform(child_state[KEY_IN_STATE], op1, op2)
             if child_task:
                 child_state[KEY_IN_STATE] = child_task
-                yield Successor(child_state,
-                                f"Merged operators '{op1.name}' and '{op2.name}'. " +
-                                f"Remaining operators: {len(task.operators) - 1}")
+                yield Successor(
+                    child_state,
+                    f"Merged operators '{op1.name}' and '{op2.name}'. "
+                    + f"Remaining operators: {len(task.operators) - 1}",
+                )
 
     def transform(self, task, op1, op2):
         def combined_pre_post(op):
@@ -247,12 +459,23 @@ class MergeOperators(SuccessorGenerator):
 
         merged_name = op1.name + " and then " + op2.name
         merged_cost = op1.cost + op2.cost
-        merged_op = SASOperator(merged_name, merged_prevail, merged_pre_post, merged_cost)
+        merged_op = SASOperator(
+            merged_name, merged_prevail, merged_pre_post, merged_cost
+        )
 
-        new_operators = [op for op in task.operators if op.name not in [op1.name, op2.name]] + [merged_op]
+        new_operators = [
+            op for op in task.operators if op.name not in [op1.name, op2.name]
+        ] + [merged_op]
 
-        return SASTask(task.variables, task.mutexes, task.init, task.goal, new_operators,
-                       task.axioms, task.metric)
+        return SASTask(
+            task.variables,
+            task.mutexes,
+            task.init,
+            task.goal,
+            new_operators,
+            task.axioms,
+            task.metric,
+        )
 
 
 class RemoveGoals(SuccessorGenerator):
@@ -260,10 +483,13 @@ class RemoveGoals(SuccessorGenerator):
     For each goal condition, generate a successor where this goal condition
     is removed. The order of the successors is randomized
     """
+
     def get_successors(self, state):
         task = state[KEY_IN_STATE]
         num_goals = len(task.goal.pairs)
         for goal_id in random.sample(range(num_goals), num_goals):
             child_state = copy.deepcopy(state)
             del child_state[KEY_IN_STATE].goal.pairs[goal_id]
-            yield Successor(child_state, f"Removed a goal. Remaining goals: {num_goals - 1}")
+            yield Successor(
+                child_state, f"Removed a goal. Remaining goals: {num_goals - 1}"
+            )

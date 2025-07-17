@@ -84,6 +84,13 @@ def contains(dumpable_object, item_name) -> bool:
         dumpable_object.dump()
     return item_name in str_io.getvalue()
 
+def contains_any(dumpable_object, item_names) -> bool:
+    """Returns true if any item_name is present in dump string of dumpable_object."""
+    str_io = io.StringIO()
+    with redirect_stdout(str_io):
+        dumpable_object.dump()
+    return any(item_name in str_io.getvalue() for item_name in item_names)
+
 
 class TaskElementErasePredicateVisitor(TaskElementVisitor):
     """Partial implementation of TaskElementVisitor interface for predicate deletion."""
@@ -256,16 +263,16 @@ class TaskElementEraseActionVisitor(TaskElementVisitor):
 class TaskElementEraseObjectVisitor(TaskElementVisitor):
     """Deletes objects from PDDL tasks."""
 
-    def __init__(self, object_name):
-        self.object_name = object_name
+    def __init__(self, object_names):
+        self.object_names = object_names
 
     def visit_task(self, task):
         new_objects = [
-            obj for obj in task.objects if obj.name != self.object_name]
-        new_init = [literal for literal in task.init if not contains(
-            literal, self.object_name)]
-        new_actions = [action for action in task.actions if not contains(
-            action, self.object_name)]
+            obj for obj in task.objects if obj.name not in self.object_names]
+        new_init = [literal for literal in task.init if not contains_any(
+            literal, self.object_names)]
+        new_actions = [action for action in task.actions if not contains_any(
+            action, self.object_names)]
         new_goal = task.goal.accept(self)
 
         return Task(task.domain_name, task.task_name, task.requirements, task.types, new_objects, task.predicates,
@@ -306,7 +313,7 @@ class TaskElementEraseObjectVisitor(TaskElementVisitor):
         return ExistentialCondition(existential_condition.parameters, new_parts).simplified()
 
     def visit_condition_atom(self, atom) -> Atom:
-        return Truth() if contains(atom, self.object_name) else atom
+        return Truth() if contains_any(atom, self.object_names) else atom
 
     def visit_condition_negated_atom(self, negated_atom) -> NegatedAtom:
-        return Falsity() if contains(negated_atom, self.object_name) else negated_atom
+        return Falsity() if contains_any(negated_atom, self.object_names) else negated_atom

@@ -36,6 +36,10 @@ def batched(iterable, n):
     while batch := tuple(itertools.islice(it, n)):
         yield batch
 
+#From https://stackoverflow.com/a/17511341
+def ceildiv(a, b):
+    return -(a // -b)
+
 
 def get_string(s):
     """
@@ -258,7 +262,7 @@ class Run:
     def start(self):
         """
         Run the command with the given resource limits
-        
+
         :returns: the 3-tuple (stdout, stderr, returncode) with the values
             obtained from the executed command.
         """
